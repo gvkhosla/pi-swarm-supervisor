@@ -1,9 +1,25 @@
 {
   "name": "pi-swarm-supervisor",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
   "description": "Multi-agent supervisor extension for pi",
   "keywords": ["pi-package"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gvkhosla/pi-swarm-supervisor.git"
+  },
+  "homepage": "https://github.com/gvkhosla/pi-swarm-supervisor#readme",
+  "bugs": {
+    "url": "https://github.com/gvkhosla/pi-swarm-supervisor/issues"
+  },
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "pi": {
     "extensions": ["./extensions"]
   },

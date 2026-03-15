@@ -8,8 +8,10 @@ Project-local Pi extension scaffold for managing multiple agents at once.
 - Tracks status, last tool, last output, token/cost stats
 - Flags likely stuck agents with lightweight heuristics
 - Runs side analyzer agents that suggest interventions
+- Lets you pick among multiple analyzer suggestions before applying one
 - Applies safe suggestions in one step (restart, switch model, spawn helper)
 - Persists swarm snapshots with `pi.appendEntry()` and restores them on resume
+- Persists role preset metadata with snapshots so restored sessions keep role context
 - Auto-analyzes workers that newly become stuck
 - Shows a footer + widget summary in the Pi UI
 - Includes a dashboard transcript tail for the selected agent
@@ -24,6 +26,7 @@ Project-local Pi extension scaffold for managing multiple agents at once.
 - `/swarm-restart <id|name>` — restart agent with same config
 - `/swarm-analyze <id|name>` — spawn analyzer side agent
 - `/swarm-apply <id|name> [index]` — apply latest analyzer suggestion
+- `/swarm-roles` — list available preset roles
 - `/swarm-clear` — remove finished agents from the dashboard
 
 ## Preset roles

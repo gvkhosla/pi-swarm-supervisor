@@ -8,15 +8,16 @@ A Pi package for supervising multiple coding agents at once.
 - live status, warnings, last tool, last output, cost/context stats
 - stuck detection heuristics
 - analyzer side agents that recommend interventions
+- action picker for multiple suggestions before applying
 - one-click suggestion application
 - session snapshot persistence via `pi.appendEntry()`
+- role preset metadata persisted alongside snapshots
 - auto-analysis when a worker becomes stuck
 - transcript tail in the dashboard for the selected agent
 
 ## Install from GitHub
 
 > Use either the packaged repo or the project-local `.pi/extensions/swarm` copy, not both at the same time, otherwise Pi will report command/tool conflicts.
-
 
 After pushing this folder as its own GitHub repo:
 
@@ -28,6 +29,14 @@ Or try it without installing:
 
 ```bash
 pi -e git:github.com/<your-user>/pi-swarm-supervisor
+```
+
+## Install from npm
+
+Once published:
+
+```bash
+pi install npm:pi-swarm-supervisor
 ```
 
 ## Install from a local checkout
@@ -51,6 +60,7 @@ pi -e ./pi-swarm-supervisor
 - `/swarm-restart <id|name>`
 - `/swarm-analyze <id|name>`
 - `/swarm-apply <id|name> [index]`
+- `/swarm-roles`
 - `/swarm-clear`
 
 ## Preset roles
@@ -104,6 +114,33 @@ Example:
 3. `/swarm`
 4. `/swarm-analyze worker`
 5. `/swarm-apply worker`
+
+## Publish to npm
+
+This repo includes GitHub Actions workflows for packaging and publishing.
+
+### One-time setup
+
+1. Add an `NPM_TOKEN` secret in GitHub repo settings.
+2. Make sure the package name is available on npm.
+3. Bump `version` in `package.json`.
+
+### Publish flow
+
+Create and push a tag:
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+That triggers `.github/workflows/publish.yml`, which runs `npm publish --access public --provenance`.
+
+### Validate locally
+
+```bash
+npm pack
+```
 
 ## Suggested repo layout
 

@@ -12,7 +12,7 @@ import type { AgentSuggestion, ManagedAgentState, StartAgentInput, SuggestionAct
 const REFRESH_MS = 5_000;
 const WIDGET_LIMIT = 8;
 const SWARM_STATE_ENTRY = "swarm-state";
-const SWARM_STATE_VERSION = 1;
+const SWARM_STATE_VERSION = 2;
 const PERSIST_DEBOUNCE_MS = 400;
 
 function truncate(text: string, max = 72): string {
@@ -65,7 +65,7 @@ function parseApplyArgs(args: string): { target?: string; index?: number } {
 	const parts = trimmed.split(/\s+/);
 	const maybeIndex = parts[parts.length - 1];
 	if (/^\d+$/.test(maybeIndex ?? "")) {
-		return { target: parts.slice(0, -1).join(" ").trim(), index: Number(maybeIndex) };
+		return { target: parts.slice(0, -1).join(" ").trim(), index: Math.max(0, Number(maybeIndex) - 1) };
 	}
 	return { target: trimmed };
 }
@@ -97,16 +97,26 @@ export default function swarmExtension(pi: ExtensionAPI) {
 	let currentCtx: ExtensionContext | undefined;
 	let refreshTimer: ReturnType<typeof setInterval> | undefined;
 	let persistTimer: ReturnType<typeof setTimeout> | undefined;
+	let dirty = false;
+
+	const markDirty = () => {
+		dirty = true;
+	};
 
 	const persistStateNow = () => {
+		if (!dirty) return;
 		pi.appendEntry(SWARM_STATE_ENTRY, {
 			version: SWARM_STATE_VERSION,
 			savedAt: Date.now(),
+			cwd: currentCtx?.cwd ?? process.cwd(),
+			rolePresets,
 			agents: store.snapshot(),
 		});
+		dirty = false;
 	};
 
 	const schedulePersist = () => {
+		if (!dirty) return;
 		if (persistTimer) clearTimeout(persistTimer);
 		persistTimer = setTimeout(() => {
 			persistTimer = undefined;
@@ -123,7 +133,19 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		const latest = ctx.sessionManager
 			.getEntries()
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === SWARM_STATE_ENTRY)
-			.pop() as { data?: { version?: number; savedAt?: number; agents?: ManagedAgentState[] } } | undefined;
+			.pop() as {
+				data?: {
+					version?: number;
+					savedAt?: number;
+					cwd?: string;
+					rolePresets?: SwarmRolePresetMap;
+					agents?: ManagedAgentState[];
+				};
+			} | undefined;
+
+		if (latest?.data?.rolePresets) {
+			rolePresets = { ...latest.data.rolePresets, ...rolePresets };
+		}
 
 		if (!latest?.data?.agents) {
 			store.replace([]);
@@ -219,21 +241,30 @@ export default function swarmExtension(pi: ExtensionAPI) {
 			stopReason: update.stopReason ?? agent.stopReason,
 			errorMessage: update.errorMessage ?? agent.errorMessage,
 		});
+		markDirty();
 		schedulePersist();
 		refreshUi();
 	};
 
 	const refreshHeuristics = () => {
+		let changed = false;
 		for (const agent of store.list()) {
 			const previousStatus = agent.status;
+			const previousWarnings = JSON.stringify(agent.warnings ?? []);
 			const warnings = evaluateWarnings(agent);
 			const status = deriveStatus(agent, warnings);
+			if (status !== previousStatus || JSON.stringify(warnings) !== previousWarnings) {
+				changed = true;
+			}
 			store.setWarnings(agent.id, warnings);
 			store.update(agent.id, { status });
 			const updated = store.get(agent.id);
 			if (updated) maybeAutoAnalyze(updated, previousStatus);
 		}
-		schedulePersist();
+		if (changed) {
+			markDirty();
+			schedulePersist();
+		}
 		refreshUi();
 	};
 
@@ -245,6 +276,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		handle.stop();
 		controllers.delete(agent.id);
 		store.update(agent.id, { status: "aborted", endedAt: Date.now() });
+		markDirty();
 		schedulePersist();
 		refreshUi();
 		return true;
@@ -267,16 +299,21 @@ export default function swarmExtension(pi: ExtensionAPI) {
 					stderr: result.stderr,
 					lastOutput: result.lastOutput ?? latest.lastOutput,
 				});
+				markDirty();
 
 				if (latest.role === "analyzer" && latest.targetAgentId && result.lastOutput) {
 					const suggestion = parseSuggestion(result.lastOutput);
-					if (suggestion) store.setSuggestion(latest.targetAgentId, suggestion);
+					if (suggestion) {
+						store.setSuggestion(latest.targetAgentId, suggestion);
+						markDirty();
+					}
 				}
 
 				refreshHeuristics();
 			},
 		});
 		controllers.set(agent.id, handle);
+		markDirty();
 		schedulePersist();
 		refreshUi();
 		return agent;
@@ -348,13 +385,33 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	const getSuggestionAction = (target: ManagedAgentState, index?: number): SuggestionAction => {
+	const getSuggestionActions = (target: ManagedAgentState): SuggestionAction[] => {
 		const actions = target.suggestion?.actions?.filter((action) => action.kind !== "none") ?? [];
 		if (!actions.length) throw new Error(`No actionable suggestion for ${target.name}`);
+		return actions;
+	};
+
+	const getSuggestionAction = (target: ManagedAgentState, index?: number): SuggestionAction => {
+		const actions = getSuggestionActions(target);
 		const resolvedIndex = index === undefined ? 0 : index;
 		const action = actions[resolvedIndex];
 		if (!action) throw new Error(`Suggestion index ${resolvedIndex} not found for ${target.name}`);
 		return action;
+	};
+
+	const pickSuggestionIndex = async (ctx: ExtensionContext, target: ManagedAgentState, preferredIndex?: number) => {
+		const actions = getSuggestionActions(target);
+		if (preferredIndex !== undefined) {
+			if (!actions[preferredIndex]) throw new Error(`Suggestion index ${preferredIndex} not found for ${target.name}`);
+			return preferredIndex;
+		}
+		if (actions.length === 1 || !ctx.hasUI) return 0;
+		const labels = actions.map(
+			(action, idx) => `${idx + 1}. ${action.kind} — ${truncate(action.rationale, 100)}`,
+		);
+		const choice = await ctx.ui.select(`Apply suggestion for ${target.name}`, labels);
+		if (!choice) return undefined;
+		return labels.indexOf(choice);
 	};
 
 	const applySuggestion = (idOrName?: string, index?: number) => {
@@ -468,6 +525,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		}
 		stopAllLiveAgents();
 		store.stopAllMarking();
+		markDirty();
 		persistStateNow();
 	});
 
@@ -482,7 +540,11 @@ export default function swarmExtension(pi: ExtensionAPI) {
 				if (action.type === "analyze") analyzeAgent(action.id);
 				if (action.type === "apply") {
 					try {
-						const result = applySuggestion(action.id);
+						const target = resolveTarget(action.id);
+						if (!target) throw new Error("No agent found to apply a suggestion to");
+						const index = await pickSuggestionIndex(ctx, target);
+						if (index === undefined) continue;
+						const result = applySuggestion(action.id, index);
 						ctx.ui.notify(result.message, "info");
 					} catch (error: any) {
 						ctx.ui.notify(error?.message ?? "Failed to apply suggestion", "warning");
@@ -574,7 +636,11 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			try {
 				const { target, index } = parseApplyArgs(args);
-				const result = applySuggestion(target, index);
+				const resolvedTarget = resolveTarget(target);
+				if (!resolvedTarget) throw new Error("No agent found to apply a suggestion to");
+				const pickedIndex = await pickSuggestionIndex(ctx, resolvedTarget, index);
+				if (pickedIndex === undefined) return;
+				const result = applySuggestion(resolvedTarget.id, pickedIndex);
 				ctx.ui.notify(result.message, "info");
 			} catch (error: any) {
 				ctx.ui.notify(error?.message ?? "Failed to apply suggestion", "warning");
@@ -597,6 +663,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		description: "Clear finished agents from the dashboard",
 		handler: async (_args, ctx) => {
 			store.clearFinished();
+			markDirty();
 			schedulePersist();
 			refreshUi();
 			ctx.ui.notify("Cleared finished agents", "info");
