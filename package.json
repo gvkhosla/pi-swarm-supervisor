@@ -1,0 +1,16 @@
+{
+  "name": "pi-swarm-supervisor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-agent supervisor extension for pi",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  }
+}
