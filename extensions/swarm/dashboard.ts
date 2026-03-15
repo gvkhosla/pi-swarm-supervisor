@@ -49,7 +49,6 @@ function selectedDetailLines(theme: Theme, agent: ManagedAgentState | undefined,
 		truncateToWidth(`${theme.fg("accent", "Agent:")} ${agent.name} (${agent.role})`, width),
 		truncateToWidth(`${theme.fg("accent", "Task:")} ${agent.task}`, width),
 		truncateToWidth(`${theme.fg("accent", "Last tool:")} ${agent.lastTool ?? "-"}`, width),
-		truncateToWidth(`${theme.fg("accent", "Last output:")} ${agent.lastOutput ?? "-"}`, width),
 		truncateToWidth(
 			`${theme.fg("accent", "Usage:")} ${agent.metrics.turns} turns · ${agent.metrics.contextTokens.toLocaleString()} ctx · $${agent.metrics.cost.toFixed(4)}`,
 			width,
@@ -57,6 +56,7 @@ function selectedDetailLines(theme: Theme, agent: ManagedAgentState | undefined,
 	];
 
 	if (agent.warnings.length) {
+		lines.push("");
 		lines.push(truncateToWidth(theme.fg("warning", "Warnings:"), width));
 		for (const warning of agent.warnings.slice(0, 3)) {
 			lines.push(truncateToWidth(`- ${warning.message}`, width));
@@ -64,11 +64,21 @@ function selectedDetailLines(theme: Theme, agent: ManagedAgentState | undefined,
 	}
 
 	if (agent.suggestion) {
+		lines.push("");
 		lines.push(truncateToWidth(theme.fg("success", "Latest analysis:"), width));
 		lines.push(truncateToWidth(agent.suggestion.summary, width));
 		for (const action of agent.suggestion.actions.slice(0, 2)) {
 			lines.push(truncateToWidth(`- ${action.kind}: ${action.rationale}`, width));
 		}
+	}
+
+	lines.push("");
+	lines.push(truncateToWidth(theme.fg("accent", "Transcript tail:"), width));
+	const transcript = agent.history.recentTranscript.length
+		? agent.history.recentTranscript.slice(-8)
+		: [agent.lastOutput ?? "(no transcript yet)"];
+	for (const line of transcript) {
+		lines.push(truncateToWidth(theme.fg("dim", line || "-"), width));
 	}
 
 	return lines;

@@ -5,7 +5,7 @@ import { openSwarmDashboard } from "./dashboard.js";
 import { deriveStatus, evaluateWarnings } from "./heuristics.js";
 import { ANALYZER_SYSTEM_PROMPT, buildAnalyzerTask, buildRestartTask, buildSideAgentTask } from "./prompts.js";
 import { spawnManagedAgent, type RunnerHandle, type RunnerUpdate } from "./runner.js";
-import { applyRolePreset, getRolePreset, listRolePresetNames } from "./roles.js";
+import { applyRolePreset, getRolePreset, listRolePresetNames, loadRolePresets, type SwarmRolePresetMap } from "./roles.js";
 import { SwarmStore } from "./state.js";
 import type { AgentSuggestion, ManagedAgentState, StartAgentInput, SuggestionAction } from "./types.js";
 
@@ -92,6 +92,8 @@ function statusGlyph(agent: ManagedAgentState): string {
 export default function swarmExtension(pi: ExtensionAPI) {
 	const store = new SwarmStore();
 	const controllers = new Map<string, RunnerHandle>();
+	const autoAnalyzeTimestamps = new Map<string, number>();
+	let rolePresets: SwarmRolePresetMap = loadRolePresets(process.cwd());
 	let currentCtx: ExtensionContext | undefined;
 	let refreshTimer: ReturnType<typeof setInterval> | undefined;
 	let persistTimer: ReturnType<typeof setTimeout> | undefined;
@@ -131,6 +133,13 @@ export default function swarmExtension(pi: ExtensionAPI) {
 
 		const restoredAgents = latest.data.agents.map((agent) => {
 			const restored = JSON.parse(JSON.stringify(agent)) as ManagedAgentState;
+			restored.history = {
+				recentTools: restored.history?.recentTools ?? [],
+				recentOutputHashes: restored.history?.recentOutputHashes ?? [],
+				recentErrorKeys: restored.history?.recentErrorKeys ?? [],
+				recentEvents: restored.history?.recentEvents ?? [],
+				recentTranscript: restored.history?.recentTranscript ?? [],
+			};
 			if (["queued", "starting", "running", "waiting_tool", "waiting_user", "stuck"].includes(restored.status)) {
 				restored.status = "aborted";
 				restored.endedAt = latest.data?.savedAt ?? Date.now();
@@ -188,6 +197,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		if (update.lastTool) store.appendTool(agentId, update.lastTool);
 		if (update.outputHash) store.appendOutputHash(agentId, update.outputHash);
 		if (update.errorKey) store.appendErrorKey(agentId, update.errorKey);
+		if (update.transcriptLine) store.appendTranscript(agentId, update.transcriptLine);
 
 		if (update.metricsDelta) {
 			agent.metrics.turns += update.metricsDelta.turns ?? 0;
@@ -215,10 +225,13 @@ export default function swarmExtension(pi: ExtensionAPI) {
 
 	const refreshHeuristics = () => {
 		for (const agent of store.list()) {
+			const previousStatus = agent.status;
 			const warnings = evaluateWarnings(agent);
 			const status = deriveStatus(agent, warnings);
 			store.setWarnings(agent.id, warnings);
 			store.update(agent.id, { status });
+			const updated = store.get(agent.id);
+			if (updated) maybeAutoAnalyze(updated, previousStatus);
 		}
 		schedulePersist();
 		refreshUi();
@@ -238,7 +251,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 	};
 
 	const startAgent = (input: StartAgentInput, presetRole?: string) => {
-		const resolvedInput = applyRolePreset(input, presetRole);
+		const resolvedInput = applyRolePreset(input, rolePresets, presetRole);
 		const agent = store.create(resolvedInput, { cwd: currentCtx?.cwd ?? process.cwd() });
 		const handle = spawnManagedAgent(agent, {
 			onUpdate: (update) => applyUpdate(agent.id, update),
@@ -286,9 +299,10 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		});
 	};
 
-	const analyzeAgent = (idOrName: string, model?: string) => {
+	const analyzeAgent = (idOrName: string, model?: string, startedBy: StartAgentInput["startedBy"] = "command") => {
 		const target = store.resolve(idOrName);
 		if (!target) return undefined;
+		autoAnalyzeTimestamps.set(target.id, Date.now());
 		return startAgent({
 			name: `${target.name}-analyzer`,
 			role: "analyzer",
@@ -296,9 +310,31 @@ export default function swarmExtension(pi: ExtensionAPI) {
 			cwd: target.cwd,
 			model: model ?? target.model,
 			systemPrompt: ANALYZER_SYSTEM_PROMPT,
-			startedBy: "command",
+			startedBy,
 			targetAgentId: target.id,
 		});
+	};
+
+	const hasActiveAnalyzerForTarget = (targetId: string) =>
+		store
+			.list()
+			.some(
+				(agent) =>
+					agent.role === "analyzer" &&
+					agent.targetAgentId === targetId &&
+					["queued", "starting", "running", "waiting_tool", "waiting_user", "stuck"].includes(agent.status),
+			);
+
+	const maybeAutoAnalyze = (agent: ManagedAgentState, previousStatus?: ManagedAgentState["status"]) => {
+		if (agent.role === "analyzer") return;
+		if (agent.status !== "stuck") return;
+		if (previousStatus === "stuck") return;
+		if (hasActiveAnalyzerForTarget(agent.id)) return;
+		const lastAutoAnalyzeAt = autoAnalyzeTimestamps.get(agent.id) ?? 0;
+		if (Date.now() - lastAutoAnalyzeAt < 60_000) return;
+		if (agent.suggestion && Date.now() - agent.suggestion.createdAt < 60_000) return;
+		analyzeAgent(agent.id, undefined, "auto");
+		currentCtx?.ui.notify(`Auto-analyzing stuck agent ${agent.name}`, "info");
 	};
 
 	const resolveTarget = (idOrName?: string) => {
@@ -307,8 +343,8 @@ export default function swarmExtension(pi: ExtensionAPI) {
 	};
 
 	const ensureKnownRole = (role: string) => {
-		if (!getRolePreset(role)) {
-			throw new Error(`Unknown role '${role}'. Available roles: ${listRolePresetNames().join(", ")}`);
+		if (!getRolePreset(role, rolePresets)) {
+			throw new Error(`Unknown role '${role}'. Available roles: ${listRolePresetNames(rolePresets).join(", ")}`);
 		}
 	};
 
@@ -380,6 +416,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		currentCtx = ctx;
+		rolePresets = loadRolePresets(ctx.cwd);
 		if (!refreshTimer) refreshTimer = setInterval(refreshHeuristics, REFRESH_MS);
 		restoreState(ctx);
 	});
@@ -392,6 +429,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		persistStateNow();
 		stopAllLiveAgents();
 		currentCtx = ctx;
+		rolePresets = loadRolePresets(ctx.cwd);
 		restoreState(ctx);
 	});
 
@@ -403,6 +441,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		persistStateNow();
 		stopAllLiveAgents();
 		currentCtx = ctx;
+		rolePresets = loadRolePresets(ctx.cwd);
 		restoreState(ctx);
 	});
 
@@ -414,6 +453,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		persistStateNow();
 		stopAllLiveAgents();
 		currentCtx = ctx;
+		rolePresets = loadRolePresets(ctx.cwd);
 		restoreState(ctx);
 	});
 
@@ -469,7 +509,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("swarm-start-role", {
-		description: `Start an agent from a preset role (${listRolePresetNames().join(", ")}). Usage: /swarm-start-role role@model :: task`,
+		description: "Start an agent from a preset role. Usage: /swarm-start-role role@model :: task",
 		handler: async (args, ctx) => {
 			let { role, model, task } = parseRoleStartArgs(args);
 			if (!role) {
@@ -542,6 +582,17 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerCommand("swarm-roles", {
+		description: "List available preset roles",
+		handler: async (_args, ctx) => {
+			const lines = listRolePresetNames(rolePresets).map((name) => {
+				const preset = getRolePreset(name, rolePresets)!;
+				return `${name}: ${preset.description}${preset.model ? ` (${preset.model})` : ""}`;
+			});
+			ctx.ui.notify(lines.join("\n") || "No roles configured", "info");
+		},
+	});
+
 	pi.registerCommand("swarm-clear", {
 		description: "Clear finished agents from the dashboard",
 		handler: async (_args, ctx) => {
@@ -586,7 +637,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "swarm_spawn_role",
 		label: "Swarm Spawn Role",
-		description: `Spawn a managed side agent from a preset role (${listRolePresetNames().join(", ")}).`,
+		description: "Spawn a managed side agent from a preset role.",
 		parameters: Type.Object({
 			role: Type.String({ description: "Preset role name" }),
 			task: Type.String({ description: "Task for the agent" }),

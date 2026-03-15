@@ -65,6 +65,7 @@ export interface AgentHistory {
 	recentOutputHashes: string[];
 	recentErrorKeys: string[];
 	recentEvents: string[];
+	recentTranscript: string[];
 }
 
 export interface ManagedAgentConfig {

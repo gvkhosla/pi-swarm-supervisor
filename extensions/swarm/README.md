@@ -10,7 +10,9 @@ Project-local Pi extension scaffold for managing multiple agents at once.
 - Runs side analyzer agents that suggest interventions
 - Applies safe suggestions in one step (restart, switch model, spawn helper)
 - Persists swarm snapshots with `pi.appendEntry()` and restores them on resume
+- Auto-analyzes workers that newly become stuck
 - Shows a footer + widget summary in the Pi UI
+- Includes a dashboard transcript tail for the selected agent
 - Provides commands and tools for orchestration
 
 ## Commands
@@ -31,6 +33,33 @@ Project-local Pi extension scaffold for managing multiple agents at once.
 - `reviewer`
 - `debugger`
 - `worker`
+
+List them in Pi with:
+
+- `/swarm-roles`
+
+Override or add roles with config files:
+
+- global: `~/.pi/agent/swarm-roles.json`
+- project: `.pi/swarm-roles.json`
+
+Project roles override global roles with the same name.
+
+Example:
+
+```json
+{
+  "researcher": {
+    "description": "Deep repo research role",
+    "tools": ["read", "grep", "find", "ls", "bash"],
+    "systemPrompt": "You are RESEARCHER. Trace the code deeply and produce an evidence-backed writeup.",
+    "model": "anthropic/claude-sonnet-4-5"
+  },
+  "scout": {
+    "model": "openai/gpt-5.4-mini"
+  }
+}
+```
 
 ## Tools
 

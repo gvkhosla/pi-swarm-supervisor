@@ -56,6 +56,7 @@ export class SwarmStore {
 				recentOutputHashes: [],
 				recentErrorKeys: [],
 				recentEvents: [],
+				recentTranscript: [],
 			},
 		};
 
@@ -87,6 +88,12 @@ export class SwarmStore {
 		const agent = this.agents.get(id);
 		if (!agent) return;
 		pushLimited(agent.history.recentEvents, event);
+	}
+
+	appendTranscript(id: string, line: string) {
+		const agent = this.agents.get(id);
+		if (!agent) return;
+		pushLimited(agent.history.recentTranscript, line, 16);
 	}
 
 	appendTool(id: string, toolName: string) {

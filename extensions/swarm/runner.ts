@@ -14,6 +14,7 @@ export interface RunnerUpdate {
 	outputHash?: string;
 	errorKey?: string;
 	eventLabel?: string;
+	transcriptLine?: string;
 	model?: string;
 	stopReason?: string;
 	errorMessage?: string;
@@ -132,6 +133,7 @@ export function spawnManagedAgent(agent: ManagedAgentState, callbacks: RunnerCal
 					lastEventAt: now,
 					lastTool: event.toolName,
 					eventLabel: `tool:${event.toolName}`,
+					transcriptLine: `→ ${event.toolName}`,
 				});
 				break;
 			case "tool_execution_end":
@@ -140,6 +142,7 @@ export function spawnManagedAgent(agent: ManagedAgentState, callbacks: RunnerCal
 					lastEventAt: now,
 					eventLabel: `tool_end:${event.toolName}`,
 					errorKey: event.isError ? `tool:${event.toolName}` : undefined,
+					transcriptLine: event.isError ? `✗ ${event.toolName}` : undefined,
 				});
 				break;
 			case "message_update": {
@@ -159,6 +162,7 @@ export function spawnManagedAgent(agent: ManagedAgentState, callbacks: RunnerCal
 						lastEventAt: now,
 						lastOutput: text,
 						outputHash: hashText(text),
+						transcriptLine: text.split("\n")[0]?.trim(),
 					});
 				}
 				if (event.message?.role === "assistant") {

@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import type { StartAgentInput } from "./types.js";
 
 export interface SwarmRolePreset {
@@ -8,7 +11,11 @@ export interface SwarmRolePreset {
 	model?: string;
 }
 
-export const SWARM_ROLE_PRESETS: Record<string, SwarmRolePreset> = {
+export type SwarmRolePresetMap = Record<string, SwarmRolePreset>;
+
+type SwarmRoleConfigFile = Record<string, Partial<SwarmRolePreset>>;
+
+const DEFAULT_ROLE_PRESETS: SwarmRolePresetMap = {
 	scout: {
 		name: "scout",
 		description: "Fast read-only reconnaissance across the codebase.",
@@ -69,17 +76,53 @@ Your job is to implement changes efficiently and safely.
 	},
 };
 
-export function listRolePresetNames(): string[] {
-	return Object.keys(SWARM_ROLE_PRESETS).sort();
+function normalizePreset(name: string, preset: Partial<SwarmRolePreset>, fallback?: SwarmRolePreset): SwarmRolePreset {
+	return {
+		name,
+		description: preset.description ?? fallback?.description ?? "Custom swarm role.",
+		tools: preset.tools ?? fallback?.tools ?? ["read", "bash", "edit", "write"],
+		systemPrompt: preset.systemPrompt ?? fallback?.systemPrompt ?? `You are ${name}. Complete the assigned task.`,
+		model: preset.model ?? fallback?.model,
+	};
 }
 
-export function getRolePreset(name?: string): SwarmRolePreset | undefined {
+function readRoleConfig(path: string): SwarmRoleConfigFile {
+	if (!existsSync(path)) return {};
+	try {
+		return JSON.parse(readFileSync(path, "utf-8")) as SwarmRoleConfigFile;
+	} catch (error) {
+		console.error(`[swarm] Failed to read role config ${path}: ${error}`);
+		return {};
+	}
+}
+
+export function loadRolePresets(cwd: string): SwarmRolePresetMap {
+	const globalPath = join(getAgentDir(), "swarm-roles.json");
+	const projectPath = join(cwd, ".pi", "swarm-roles.json");
+	const globalRoles = readRoleConfig(globalPath);
+	const projectRoles = readRoleConfig(projectPath);
+
+	const merged: SwarmRolePresetMap = { ...DEFAULT_ROLE_PRESETS };
+	for (const [name, preset] of Object.entries(globalRoles)) {
+		merged[name] = normalizePreset(name, preset, merged[name]);
+	}
+	for (const [name, preset] of Object.entries(projectRoles)) {
+		merged[name] = normalizePreset(name, preset, merged[name]);
+	}
+	return merged;
+}
+
+export function listRolePresetNames(presets: SwarmRolePresetMap): string[] {
+	return Object.keys(presets).sort();
+}
+
+export function getRolePreset(name: string | undefined, presets: SwarmRolePresetMap): SwarmRolePreset | undefined {
 	if (!name) return undefined;
-	return SWARM_ROLE_PRESETS[name.trim().toLowerCase()];
+	return presets[name.trim().toLowerCase()];
 }
 
-export function applyRolePreset(input: StartAgentInput, roleName?: string): StartAgentInput {
-	const preset = getRolePreset(roleName ?? input.role ?? input.name);
+export function applyRolePreset(input: StartAgentInput, presets: SwarmRolePresetMap, roleName?: string): StartAgentInput {
+	const preset = getRolePreset(roleName ?? input.role ?? input.name, presets);
 	if (!preset) return input;
 
 	const mergedPrompt = input.systemPrompt?.trim()
