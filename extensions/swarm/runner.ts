@@ -15,7 +15,7 @@ export interface RunnerUpdate {
 	errorKey?: string;
 	eventLabel?: string;
 	transcriptLine?: string;
-	model?: string;
+	resolvedModel?: string;
 	stopReason?: string;
 	errorMessage?: string;
 	metrics?: Partial<AgentMetrics>;
@@ -168,7 +168,7 @@ export function spawnManagedAgent(agent: ManagedAgentState, callbacks: RunnerCal
 				if (event.message?.role === "assistant") {
 					const usage = event.message?.usage;
 					callbacks.onUpdate({
-						model: event.message?.model,
+						resolvedModel: event.message?.model,
 						stopReason: event.message?.stopReason,
 						errorMessage: event.message?.errorMessage,
 						metricsDelta: {

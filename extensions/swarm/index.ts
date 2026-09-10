@@ -89,6 +89,24 @@ function statusGlyph(agent: ManagedAgentState): string {
 	}
 }
 
+function displayModel(agent: ManagedAgentState): string | undefined {
+	if (agent.model && agent.resolvedModel && agent.model !== agent.resolvedModel) {
+		return `${agent.model} → ${agent.resolvedModel}`;
+	}
+	return agent.resolvedModel ?? agent.model;
+}
+
+function stderrTail(stderr?: string, lines = 2): string | undefined {
+	if (!stderr?.trim()) return undefined;
+	return stderr
+		.trim()
+		.split("\n")
+		.slice(-lines)
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.join(" | ");
+}
+
 export default function swarmExtension(pi: ExtensionAPI) {
 	const store = new SwarmStore();
 	const controllers = new Map<string, RunnerHandle>();
@@ -203,7 +221,8 @@ export default function swarmExtension(pi: ExtensionAPI) {
 		const lines = store.list().slice(0, WIDGET_LIMIT).map((agent) => {
 			const warning = agent.warnings.length ? theme.fg("warning", " ⚠") : "";
 			const tool = agent.lastTool ? theme.fg("dim", ` ${agent.lastTool}`) : "";
-			return `${theme.fg("accent", statusGlyph(agent))} ${agent.name} ${theme.fg("muted", agent.status)}${warning}${tool}`;
+			const model = displayModel(agent) ? theme.fg("dim", ` ${displayModel(agent)}`) : "";
+			return `${theme.fg("accent", statusGlyph(agent))} ${agent.name} ${theme.fg("muted", agent.status)}${warning}${tool}${model}`;
 		});
 		if (store.list().length > WIDGET_LIMIT) {
 			lines.push(theme.fg("dim", `... ${store.list().length - WIDGET_LIMIT} more`));
@@ -237,7 +256,7 @@ export default function swarmExtension(pi: ExtensionAPI) {
 			lastEventAt: update.lastEventAt ?? Date.now(),
 			lastTool: update.lastTool ?? agent.lastTool,
 			lastOutput: update.lastOutput ?? agent.lastOutput,
-			model: update.model ?? agent.model,
+			resolvedModel: update.resolvedModel ?? agent.resolvedModel,
 			stopReason: update.stopReason ?? agent.stopReason,
 			errorMessage: update.errorMessage ?? agent.errorMessage,
 		});
@@ -747,18 +766,29 @@ export default function swarmExtension(pi: ExtensionAPI) {
 				role: agent.role,
 				status: agent.status,
 				model: agent.model,
+				resolvedModel: agent.resolvedModel,
+				displayModel: displayModel(agent),
 				lastTool: agent.lastTool,
 				lastOutput: agent.lastOutput,
 				warnings: agent.warnings,
 				suggestion: agent.suggestion,
+				stopReason: agent.stopReason,
+				errorMessage: agent.errorMessage,
+				stderrTail: stderrTail(agent.stderr),
 			}));
 			const text =
 				params.format === "text"
 					? agents
-							.map(
-								(agent) =>
-									`${agent.id} ${agent.name} ${agent.status}${agent.warnings.length ? " ⚠" : ""} ${truncate(agent.lastOutput ?? "", 60)}`,
-							)
+							.map((agent) => {
+								const parts = [
+									agent.id,
+									agent.name,
+									agent.status + (agent.warnings.length ? " ⚠" : ""),
+									agent.displayModel ? `[${agent.displayModel}]` : "",
+									truncate(agent.errorMessage ?? agent.stderrTail ?? agent.lastOutput ?? "", 80),
+								].filter(Boolean);
+								return parts.join(" ");
+							})
 							.join("\n") || "No managed agents."
 					: JSON.stringify(agents, null, 2);
 			return { content: [{ type: "text", text }], details: { agents } };

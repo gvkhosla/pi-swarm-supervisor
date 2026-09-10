@@ -34,10 +34,27 @@ function statusLabel(theme: Theme, status: ManagedAgentState["status"]): string 
 	}
 }
 
+function modelLabel(agent: ManagedAgentState): string | undefined {
+	if (agent.model && agent.resolvedModel && agent.model !== agent.resolvedModel) {
+		return `${agent.model} → ${agent.resolvedModel}`;
+	}
+	return agent.resolvedModel ?? agent.model;
+}
+
+function stderrTail(stderr?: string, lines = 3): string[] {
+	if (!stderr?.trim()) return [];
+	return stderr
+		.trim()
+		.split("\n")
+		.slice(-lines)
+		.map((line) => line.trim())
+		.filter(Boolean);
+}
+
 function renderAgentLine(theme: Theme, agent: ManagedAgentState, selected: boolean, width: number): string {
 	const prefix = selected ? theme.fg("accent", "› ") : "  ";
 	const warningMark = agent.warnings.length ? theme.fg("warning", " ⚠") : "";
-	const model = agent.model ? theme.fg("dim", ` ${agent.model}`) : "";
+	const model = modelLabel(agent) ? theme.fg("dim", ` ${modelLabel(agent)}`) : "";
 	const line = `${prefix}${theme.fg("text", agent.name)} ${statusLabel(theme, agent.status)} ${theme.fg("dim", ageSeconds(agent.lastEventAt))}${warningMark}${model}`;
 	return truncateToWidth(line, width);
 }
@@ -49,11 +66,28 @@ function selectedDetailLines(theme: Theme, agent: ManagedAgentState | undefined,
 		truncateToWidth(`${theme.fg("accent", "Agent:")} ${agent.name} (${agent.role})`, width),
 		truncateToWidth(`${theme.fg("accent", "Task:")} ${agent.task}`, width),
 		truncateToWidth(`${theme.fg("accent", "Last tool:")} ${agent.lastTool ?? "-"}`, width),
+		truncateToWidth(`${theme.fg("accent", "Model:")} ${modelLabel(agent) ?? "default"}`, width),
 		truncateToWidth(
 			`${theme.fg("accent", "Usage:")} ${agent.metrics.turns} turns · ${agent.metrics.contextTokens.toLocaleString()} ctx · $${agent.metrics.cost.toFixed(4)}`,
 			width,
 		),
 	];
+
+	if (agent.stopReason || agent.errorMessage) {
+		lines.push("");
+		lines.push(truncateToWidth(theme.fg("warning", "Runtime:"), width));
+		if (agent.stopReason) lines.push(truncateToWidth(`- stop reason: ${agent.stopReason}`, width));
+		if (agent.errorMessage) lines.push(truncateToWidth(`- error: ${agent.errorMessage}`, width));
+	}
+
+	const stderrLines = stderrTail(agent.stderr, 3);
+	if (stderrLines.length) {
+		lines.push("");
+		lines.push(truncateToWidth(theme.fg("error", "stderr tail:"), width));
+		for (const line of stderrLines) {
+			lines.push(truncateToWidth(line, width));
+		}
+	}
 
 	if (agent.warnings.length) {
 		lines.push("");

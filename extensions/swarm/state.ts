@@ -175,6 +175,7 @@ export class SwarmStore {
 			role: agent.role,
 			status: agent.status,
 			model: agent.model,
+			resolvedModel: agent.resolvedModel,
 			lastTool: agent.lastTool,
 			lastOutput: agent.lastOutput,
 			warnings: agent.warnings,

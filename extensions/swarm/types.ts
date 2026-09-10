@@ -90,6 +90,7 @@ export interface ManagedAgentState extends ManagedAgentConfig {
 	pid?: number;
 	lastTool?: string;
 	lastOutput?: string;
+	resolvedModel?: string;
 	warnings: AgentWarning[];
 	suggestion?: AgentSuggestion;
 	metrics: AgentMetrics;
