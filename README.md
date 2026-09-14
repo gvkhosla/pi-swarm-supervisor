@@ -31,8 +31,6 @@ pi -e git:github.com/gvkhosla/pi-swarm-supervisor
 
 ## Install from npm
 
-When an npm token is configured and a release tag is pushed:
-
 ```bash
 pi install npm:pi-swarm-supervisor
 ```
