@@ -19,21 +19,19 @@ A Pi package for supervising multiple coding agents at once.
 
 > Use either the packaged repo or the project-local `.pi/extensions/swarm` copy, not both at the same time, otherwise Pi will report command/tool conflicts.
 
-After pushing this folder as its own GitHub repo:
-
 ```bash
-pi install git:github.com/<your-user>/pi-swarm-supervisor
+pi install git:github.com/gvkhosla/pi-swarm-supervisor
 ```
 
 Or try it without installing:
 
 ```bash
-pi -e git:github.com/<your-user>/pi-swarm-supervisor
+pi -e git:github.com/gvkhosla/pi-swarm-supervisor
 ```
 
 ## Install from npm
 
-Once published:
+When an npm token is configured and a release tag is pushed:
 
 ```bash
 pi install npm:pi-swarm-supervisor
