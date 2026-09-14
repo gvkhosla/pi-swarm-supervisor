@@ -1,5 +1,7 @@
 # pi-swarm-supervisor
 
+[![npm](https://img.shields.io/npm/v/pi-swarm-supervisor)](https://www.npmjs.com/package/pi-swarm-supervisor)
+
 A Pi package for supervising multiple coding agents at once.
 
 ## Features
